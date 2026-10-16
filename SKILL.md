@@ -25,24 +25,31 @@
 
 ## 标准处理流程
 
-### 流程 A：省钱领券
-1. 调用 `available-coupons` 查询当前可领取的优惠券。
-2. 调用 `query-my-coupons` 查询用户卡包已有优惠券。
-3. 调用 `auto-bind-coupons` 帮用户一键领取所有可领券（需先询问确认）。
-4. 把结果整理成「可领」和「已有」两张清单，标出最划算的 2-3 张。
+### 流程 A：省钱领券（✅ 已端到端实测通过）
+1. 调用 `available-coupons` 查询用户麦麦省账户里的优惠券（返回含「已领取」状态字段）。
+2. 调用 `auto-bind-coupons` 一键领取账户里**待领**的券（需先询问确认）。
+3. 把结果整理成清单，标出最划算的 2-3 张，并提示用户哪些已经领过。
 
-### 流程 B：按预算智能凑单
+> **⚠️ 实测关键坑（必看）**：`auto-bind-coupons` 领的是账户里**当前待领取**的券，不是凭空生成新券。若用户之前已领完（我们实测时正是如此），接口会友好返回「暂无可领取的优惠券」，这是**正常结果、不是报错**，不要当成异常提示用户。另外本仓库未使用 `query-my-coupons` 工具——账户券与待领券均由 `available-coupons` 一并返回（含状态字段），无需重复调用。
+
+### 流程 B：按预算智能凑单（✅ 已端到端实测通过）
 1. 调用 `query-nearby-stores` 或询问用户选择哪家门店。
 2. 调用 `query-meals` 查该门店当前菜单和价格。
 3. 调用 `query-store-coupons` 查该门店可用券。
 4. 组合 2-3 种点单方案，调用 `calculate-price` 算出实付价。
 5. 给出「最省钱方案」「最值方案」「刚好达标方案」供用户选。
 
-### 流程 C：按热量/营养目标推荐
-1. 调用 `list-nutrition-foods` 获取常见餐品营养数据。
-2. 根据用户目标（如减脂期 ≤600 大卡、高蛋白、低钠等）筛选。
-3. 如果预算也有限，结合流程 B 的菜单价格一起做推荐。
-4. 给出 1-2 套搭配，并说明热量、蛋白质、脂肪和价格。
+> **⚠️ 实测关键坑（必看）**：`calculate-price` 在使用优惠券时，**必须同时传 `couponId` 和 `couponCode` 两个字段**，只传 `couponCode` 会报错 `600010 使用优惠券需要couponId和couponCode`。券的 `couponId` 和 `couponCode` 都来自 `query-store-coupons` 的返回，调用前先存好。
+> 另外 `calculate-price` 返回的 `price`/`originalPrice` 等单位是**分**，展示给用户时要 ÷100 转成元。
+
+### 流程 C：按热量/营养目标推荐（✅ 已端到端实测通过）
+1. 调用 `list-nutrition-foods` 获取常见餐品营养数据（能量/蛋白质/脂肪/碳水/钠/钙）。
+2. 根据用户目标（如减脂期 ≤600 大卡、高蛋白、低钠等）筛选餐品。
+3. **关键**：`list-nutrition-foods` 只返回**产品名 + 营养数据，不含 productCode**。要算价，必须先把营养表的产品名映射到 `query-meals` 返回的 `productCode`（见下方「营养-编码映射表」）。
+4. 用映射出的 productCode 调用 `calculate-price` 验算实付价。
+5. 给出 1-2 套搭配，说明热量、蛋白质、脂肪和价格。
+
+> **⚠️ 实测关键坑（必看）**：营养表里的产品名（如「麦香鸡」）和菜单 `productCode` 不是一一对应的简单规则，需要人工建立一份「营养产品名 → productCode」映射表内置在 Skill 里，否则 AI 拿到热量却算不了价。我们实测用的映射片段：麦香鸡→`1450`、苹果片→`6102`、纯悦→`3757`、巨无霸→`1100`、可乐→`9900008751`、脆薯饼→`521741`。
 
 ---
 
@@ -50,7 +57,7 @@
 
 | 用户意图 | 必须调用的工具 |
 |---|---|
-| 查/领优惠券 | `available-coupons`、`query-my-coupons`、`auto-bind-coupons` |
+| 查/领优惠券 | `available-coupons`、`auto-bind-coupons` |
 | 按预算凑单 | `query-nearby-stores`、`query-meals`、`query-store-coupons`、`calculate-price` |
 | 按热量/营养推荐 | `list-nutrition-foods`、`query-meals`、`calculate-price` |
 | 查附近门店 | `query-nearby-stores` |
